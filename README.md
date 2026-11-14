@@ -16,7 +16,7 @@ Add `github.com/charmingruby/erebor` as a dependency, then import the packages y
 
 - [Environment](env) — Typed configuration loading from environment variables, with optional `.env` file support.
 - [HTTP](httpx) — HTTP clients, servers, JSON request validation, response helpers, logging, recovery, and health probes.
-- [AI](aikit) — Model inference, agents, validated tools, embeddings, providers, MCP servers built on Genkit.
+- [AI](aikit) — Model inference, agents, validated tools, embeddings, and MCP servers over local stdio or remote Streamable HTTP, built on Genkit.
 - [AI providers](aikit/provider) — Google AI and OpenAI integrations.
 - [Logging](o11y/logging) — Structured JSON logging and context-aware logger access.
 - [PostgreSQL](store/postgrex) — Connections, named prepared statements, typed query helpers, and transactions.
