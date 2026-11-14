@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // Register the PostgreSQL database/sql driver.
 )
 
+// Connect opens and verifies a PostgreSQL connection with a five-second timeout.
 func Connect(ctx context.Context, url string) (*sqlx.DB, error) {
 	ctx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()

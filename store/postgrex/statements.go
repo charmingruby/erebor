@@ -6,10 +6,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// Statements holds prepared SQL statements indexed by name.
 type Statements struct {
 	stmts map[string]*sqlx.Stmt
 }
 
+// Prepare prepares each named query using db.
 func Prepare(db Querier, queries map[string]string) (*Statements, error) {
 	stmts := make(map[string]*sqlx.Stmt, len(queries))
 
@@ -25,6 +27,7 @@ func Prepare(db Querier, queries map[string]string) (*Statements, error) {
 	return &Statements{stmts: stmts}, nil
 }
 
+// Stmt returns a prepared statement by name or an ErrQueryPreparation error.
 func (s *Statements) Stmt(name string) (*sqlx.Stmt, error) {
 	stmt, ok := s.stmts[name]
 	if !ok {

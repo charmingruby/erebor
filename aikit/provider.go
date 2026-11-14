@@ -5,6 +5,7 @@ import (
 	"github.com/firebase/genkit/go/core/api"
 )
 
+// Provider supplies a Genkit plugin and model and embedder references.
 type Provider interface {
 	Plugin() api.Plugin
 	Model(name string) genai.ModelRef

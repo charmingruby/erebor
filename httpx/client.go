@@ -14,21 +14,30 @@ import (
 )
 
 var (
-	ErrCreateRequest        = errors.New("create request")
-	ErrEncodeRequestBody    = errors.New("encode request body")
-	ErrDoRequest            = errors.New("do request")
+	// ErrCreateRequest indicates that an HTTP request could not be constructed.
+	ErrCreateRequest = errors.New("create request")
+	// ErrEncodeRequestBody indicates that a request body could not be encoded.
+	ErrEncodeRequestBody = errors.New("encode request body")
+	// ErrDoRequest indicates that an HTTP request failed.
+	ErrDoRequest = errors.New("do request")
+	// ErrUnexpectedStatusCode indicates that a response has an unexpected status.
 	ErrUnexpectedStatusCode = errors.New("unexpected status code")
-	ErrDecodeResponse       = errors.New("decode response")
-	ErrMissingBaseURL       = errors.New("missing base URL")
+	// ErrDecodeResponse indicates that a response body could not be read or decoded.
+	ErrDecodeResponse = errors.New("decode response")
+	// ErrMissingBaseURL indicates that a relative request URL has no configured base URL.
+	ErrMissingBaseURL = errors.New("missing base URL")
 )
 
+// Client sends HTTP requests with an optional base URL.
 type Client struct {
 	client  *http.Client
 	baseURL string
 }
 
+// ClientOption configures a Client.
 type ClientOption func(*Client)
 
+// NewClient creates a client with a five-second default timeout.
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
 		client: &http.Client{Timeout: 5 * time.Second},
@@ -41,18 +50,21 @@ func NewClient(opts ...ClientOption) *Client {
 	return c
 }
 
+// WithHTTPClient sets the underlying HTTP client.
 func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(c *Client) {
 		c.client = hc
 	}
 }
 
+// WithBaseURL sets the base URL used for relative request URLs.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *Client) {
 		c.baseURL = baseURL
 	}
 }
 
+// Request describes an HTTP request and its expected response status.
 type Request struct {
 	Body           any
 	Headers        http.Header
@@ -61,6 +73,7 @@ type Request struct {
 	ExpectedStatus int
 }
 
+// Do sends a request and decodes its JSON response into T.
 func Do[T any](
 	ctx context.Context,
 	c *Client,

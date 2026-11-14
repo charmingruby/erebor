@@ -5,19 +5,23 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charmingruby/erebor/o11y/logging"
 	genai "github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/core/api"
 	"github.com/firebase/genkit/go/core/status"
 	"github.com/firebase/genkit/go/genkit"
+
+	"github.com/charmingruby/erebor/o11y/logging"
 )
 
+// ErrInference indicates that model inference or agent execution failed.
 var ErrInference = errors.New("inference failed")
 
+// AIKit holds the Genkit instance used for AI operations.
 type AIKit struct {
 	Genkit *genkit.Genkit
 }
 
+// New initializes AIKit with the supplied providers and experimental agent support.
 func New(ctx context.Context, providers ...Provider) *AIKit {
 	plugins := make([]api.Plugin, 0, len(providers))
 	for _, provider := range providers {
@@ -29,6 +33,7 @@ func New(ctx context.Context, providers ...Provider) *AIKit {
 	}
 }
 
+// Infer generates a model response using the supplied tools and options.
 func (a *AIKit) Infer(
 	ctx context.Context,
 	model genai.ModelRef,

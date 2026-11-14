@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/charmingruby/erebor/o11y/logging"
 	genai "github.com/firebase/genkit/go/ai"
+
+	"github.com/charmingruby/erebor/o11y/logging"
 )
 
 func toolPolicyMiddleware() genai.Middleware {

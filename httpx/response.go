@@ -7,27 +7,33 @@ import (
 	"github.com/charmingruby/erebor/validator"
 )
 
+// ErrorResponse describes an API error and optional field validation failures.
 type ErrorResponse struct {
 	Message string                 `json:"message"`
 	Fields  []validator.FieldError `json:"fields,omitempty"`
 }
 
+// WriteOKResponse writes v as JSON with status 200.
 func WriteOKResponse(w http.ResponseWriter, v any) {
 	writeResponse(w, http.StatusOK, v)
 }
 
+// WriteCreatedResponse writes v as JSON with status 201.
 func WriteCreatedResponse(w http.ResponseWriter, v any) {
 	writeResponse(w, http.StatusCreated, v)
 }
 
+// WriteEmptyResponse writes status 204 without a response body.
 func WriteEmptyResponse(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func WriteBadRequest(w http.ResponseWriter, r *http.Request, err error) {
+// WriteBadRequest writes the error message as JSON with status 400.
+func WriteBadRequest(w http.ResponseWriter, _ *http.Request, err error) {
 	writeResponse(w, http.StatusBadRequest, err.Error())
 }
 
+// WriteErrorResponse writes an error response as JSON with the supplied status.
 func WriteErrorResponse(w http.ResponseWriter, status int, response ErrorResponse) {
 	writeResponse(w, status, response)
 }

@@ -6,18 +6,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/charmingruby/erebor/o11y/logging"
 	genai "github.com/firebase/genkit/go/ai"
 	aix "github.com/firebase/genkit/go/ai/exp"
 	"github.com/firebase/genkit/go/genkit"
 	genkitx "github.com/firebase/genkit/go/genkit/exp"
+
+	"github.com/charmingruby/erebor/o11y/logging"
 )
 
+// Agent wraps a Genkit agent with logging and inference error handling.
 type Agent struct {
 	def  *aix.Agent[struct{}]
 	name string
 }
 
+// DefineAgent registers an agent with the supplied model, tools, and prompt.
 func DefineAgent(
 	ak *AIKit,
 	name string,
@@ -52,6 +55,7 @@ func DefineAgent(
 	}, nil
 }
 
+// Run sends a message to the agent and returns its text response.
 func (a *Agent) Run(
 	ctx context.Context,
 	message string,
@@ -99,10 +103,12 @@ func (a *Agent) Run(
 	return text, nil
 }
 
+// HandleHTTP serves the agent through Genkit's HTTP handler.
 func (a *Agent) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	genkit.Handler(a.def).ServeHTTP(w, r)
 }
 
+// Ref returns the underlying agent reference.
 func (a *Agent) Ref() aix.AgentRef {
 	return a.def.Ref()
 }

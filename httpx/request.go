@@ -6,15 +6,19 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/charmingruby/erebor/validator"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/charmingruby/erebor/validator"
 )
 
 var (
+	// ErrInvalidPayload indicates an invalid request payload.
 	ErrInvalidPayload = errors.New("invalid payload")
-	ErrMissingParam   = errors.New("missing param")
+	// ErrMissingParam indicates a required request parameter is absent.
+	ErrMissingParam = errors.New("missing param")
 )
 
+// ParseRequest decodes and validates a JSON request, writing a bad request response on failure.
 func ParseRequest[T any](w http.ResponseWriter, r *http.Request) (*T, error) {
 	var obj T
 
@@ -42,6 +46,7 @@ func ParseRequest[T any](w http.ResponseWriter, r *http.Request) (*T, error) {
 	return &obj, nil
 }
 
+// GetPathParam returns a required chi route parameter.
 func GetPathParam(r *http.Request, key string) (string, error) {
 	param := chi.URLParam(r, key)
 	if param == "" {
@@ -51,6 +56,7 @@ func GetPathParam(r *http.Request, key string) (string, error) {
 	return param, nil
 }
 
+// GetQueryParam returns a required URL query parameter.
 func GetQueryParam(r *http.Request, key string) (string, error) {
 	param := r.URL.Query().Get(key)
 	if param == "" {

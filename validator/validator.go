@@ -14,6 +14,7 @@ import (
 
 var instance = sync.OnceValues(newValidator)
 
+// Validate checks a struct's validation tags and returns any field failures.
 func Validate(s any) error {
 	v, translator := instance()
 

@@ -10,6 +10,7 @@ import (
 	genai "github.com/firebase/genkit/go/ai"
 )
 
+// Embedder generates and validates fixed-dimensional embedding vectors.
 type Embedder struct {
 	provider Provider
 	genkit   *genkit.Genkit
@@ -17,6 +18,7 @@ type Embedder struct {
 	dim      int
 }
 
+// NewEmbedder creates an embedder for the supplied provider, model, and dimensions.
 func NewEmbedder(ak *AIKit, provider Provider, model string, dim int) (*Embedder, error) {
 	if _, err := provider.Embedder(model, dim, false); err != nil {
 		return nil, err
@@ -30,6 +32,7 @@ func NewEmbedder(ak *AIKit, provider Provider, model string, dim int) (*Embedder
 	}, nil
 }
 
+// Embed returns a finite, nonzero vector for text, using query mode when requested.
 func (e *Embedder) Embed(
 	ctx context.Context,
 	text string,

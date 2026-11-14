@@ -8,10 +8,13 @@ import (
 )
 
 const (
+	// DefaultWriteTimeout limits the duration of write queries.
 	DefaultWriteTimeout = 6 * time.Second
-	DefaultReadTimeout  = 4 * time.Second
+	// DefaultReadTimeout limits the duration of read queries.
+	DefaultReadTimeout = 4 * time.Second
 )
 
+// One scans a named query's first row into T, returning nil when no row exists.
 func One[T any](ctx context.Context, stmts *Statements, name string, args ...any) (*T, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultReadTimeout)
 	defer cancel()
@@ -33,6 +36,7 @@ func One[T any](ctx context.Context, stmts *Statements, name string, args ...any
 	return &row, nil
 }
 
+// Many scans all rows from a named query into a slice of T.
 func Many[T any](ctx context.Context, stmts *Statements, name string, args ...any) ([]T, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultReadTimeout)
 	defer cancel()
@@ -50,6 +54,7 @@ func Many[T any](ctx context.Context, stmts *Statements, name string, args ...an
 	return rows, nil
 }
 
+// Exec executes a named statement with the default write timeout.
 func Exec(ctx context.Context, stmts *Statements, name string, args ...any) error {
 	ctx, cancel := context.WithTimeout(ctx, DefaultWriteTimeout)
 	defer cancel()
@@ -64,6 +69,7 @@ func Exec(ctx context.Context, stmts *Statements, name string, args ...any) erro
 	return err
 }
 
+// ExecReturning executes a named write query and scans its returned value into T.
 func ExecReturning[T any](ctx context.Context, stmts *Statements, name string, args ...any) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultWriteTimeout)
 	defer cancel()

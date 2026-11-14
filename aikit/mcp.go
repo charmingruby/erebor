@@ -10,13 +10,13 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-const mcpServerName string = "winston"
-
+// MCPServer exposes Genkit tools through the Model Context Protocol.
 type MCPServer struct {
 	*genkitmcp.GenkitMCPServer
 }
 
-func NewMCPServer(ctx context.Context, tools []Tool) *MCPServer {
+// NewMCPServer creates an MCP server with the supplied tools.
+func NewMCPServer(ctx context.Context, serverName string, tools []Tool) *MCPServer {
 	g := genkit.Init(ctx)
 
 	for _, tool := range tools {
@@ -27,11 +27,12 @@ func NewMCPServer(ctx context.Context, tools []Tool) *MCPServer {
 		GenkitMCPServer: genkitmcp.NewMCPServer(
 			g,
 			genkitmcp.MCPServerOptions{
-				Name: mcpServerName,
+				Name: serverName,
 			}),
 	}
 }
 
+// Start serves MCP requests over standard input and output until stopped.
 func (s *MCPServer) Start(ctx context.Context) error {
 	if err := mcpserver.NewStdioServer(s.GetServer()).Listen(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(
 		err,
