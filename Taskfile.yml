@@ -31,5 +31,5 @@ tasks:
         [ -n "{{.CLI_ARGS}}" ] || { echo "Usage: task rename -- <new-name>"; exit 1; }
         for file in ./* ./.*; do
           [ -f "$file" ] || continue
-          sed -i.bak "s/rib/{{.CLI_ARGS}}/g" "$file" && rm -f "$file.bak"
+          sed -i.bak "s/erebor/{{.CLI_ARGS}}/g" "$file" && rm -f "$file.bak"
         done
