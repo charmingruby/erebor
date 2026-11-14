@@ -7,7 +7,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/charmingruby/rib
+        - github.com/charmingruby/erebor
     golines:
       max-len: 120
   exclusions:
@@ -56,7 +56,6 @@ linters:
     - nestif
     - nilerr
     - nilnesserr
-    - nilnil
     - noctx
     - nolintlint
     - nonamedreturns
