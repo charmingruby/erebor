@@ -14,7 +14,7 @@ Add `github.com/charmingruby/erebor` as a dependency, then import the packages y
 
 ## Packages
 
-- [Configuration](config) — Typed configuration loading from environment variables, with optional `.env` file support.
+- [Environment](env) — Typed configuration loading from environment variables, with optional `.env` file support.
 - [HTTP](httpx) — HTTP clients, servers, JSON request validation, response helpers, logging, recovery, and health probes.
 - [AI](aikit) — Model inference, agents, validated tools, embeddings, providers, MCP servers built on Genkit.
 - [AI providers](aikit/provider) — Google AI and OpenAI integrations.
