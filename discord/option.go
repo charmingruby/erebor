@@ -1,12 +1,17 @@
 package discord
 
-import "time"
+import (
+	"time"
+
+	"github.com/charmingruby/erebor/discord/mention"
+)
 
 // BotOption configures a bot before its session is created.
 type BotOption func(*Bot)
 
-// WithHandler enables mentions and replies. A nil handler disables them.
-func WithHandler(handler Handler) BotOption {
+// WithMentionReplyHandler handles guild mentions and replies to the bot's
+// messages. A nil handler disables both; slash commands are unaffected.
+func WithMentionReplyHandler(handler mention.Handler) BotOption {
 	return func(b *Bot) {
 		b.mentionHandler = handler
 	}
@@ -19,24 +24,17 @@ func WithErrorMessage(message string) BotOption {
 	}
 }
 
-// WithCommandGuildID limits command registration to a guild. Empty means global.
-func WithCommandGuildID(guildID string) BotOption {
+// WithCommandGuild limits command registration to a guild. Empty means global.
+func WithCommandGuild(guildID string) BotOption {
 	return func(b *Bot) {
 		b.config.CommandGuildID = guildID
 	}
 }
 
-// WithMaxConcurrentRequests sets a positive handler limit. The default is 8.
-func WithMaxConcurrentRequests(limit int) BotOption {
+// WithHTTPTimeout sets a positive HTTP timeout. The default is 15 seconds.
+func WithHTTPTimeout(timeout time.Duration) BotOption {
 	return func(b *Bot) {
-		b.config.MaxConcurrentRequests = limit
-	}
-}
-
-// WithRequestTimeout sets a positive HTTP timeout. The default is 15 seconds.
-func WithRequestTimeout(timeout time.Duration) BotOption {
-	return func(b *Bot) {
-		b.config.RequestTimeout = timeout
+		b.config.HTTPTimeout = timeout
 	}
 }
 

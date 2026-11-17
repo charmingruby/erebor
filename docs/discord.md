@@ -9,28 +9,30 @@ AI models or application prompts.
 Mention handling is opt-in. Register commands before starting the listener:
 
 ```go
+// Imports: github.com/charmingruby/erebor/discord
+//          github.com/charmingruby/erebor/discord/command
+
 bot, err := discord.NewBot(
     os.Getenv("DISCORD_BOT_TOKEN"),
-    discord.WithCommandGuildID(os.Getenv("DISCORD_GUILD_ID")), // Empty = global.
+    discord.WithCommandGuild(os.Getenv("DISCORD_GUILD_ID")), // Empty = global.
     discord.WithErrorMessage("Não consegui executar o comando. Tente novamente."),
 )
 if err != nil {
     return err
 }
 
-err = bot.RegisterCommand(discord.Command{
+err = bot.RegisterCommand(command.Definition{
     Name: "echo",
     Description: "Retorna o texto informado",
-    Ephemeral: true,
-    Options: []*discordgo.ApplicationCommandOption{
-        {
+    OnlyVisibleToCaller: true,
+    Parameters: []*command.Parameter{
+        command.String(command.Parameter{
             Name: "text",
             Description: "Texto para retornar",
-            Type: discordgo.ApplicationCommandOptionString,
             Required: true,
-        },
+        }),
     },
-    Handler: func(ctx context.Context, interaction discord.Interaction) (string, error) {
+    Handler: func(ctx context.Context, interaction command.Interaction) (string, error) {
         for _, option := range interaction.Options {
             if option.Name == "text" {
                 return option.StringValue(), nil
@@ -48,8 +50,31 @@ defer stop()
 return bot.Listen(ctx)
 ```
 
-Options use `github.com/bwmarrin/discordgo`: strings, numbers, booleans, users,
-roles, channels, attachments, choices, and nested subcommands. The callback gets
+Build parameters with `command.String`, `command.Integer`, `command.Number`,
+`command.Boolean`, `command.User`, `command.Role`, `command.Channel`, `command.Mentionable`,
+or `command.Attachment`. Each accepts a `command.Parameter` with explicit fields
+and sets its Discord type. Parameters are optional unless `Required: true` is set.
+String, integer, and number parameters support `Choices`.
+Use `command.Subcommand` and `SubcommandGroup` for nested actions:
+
+```go
+parameters := []*command.Parameter{
+    command.Subcommand("set", "Define uma preferência",
+        command.String(command.Parameter{
+            Name: "language",
+            Description: "Idioma",
+            Required: true,
+            Choices: []*command.Choice{
+                {Name: "Português", Value: "pt"},
+                {Name: "English", Value: "en"},
+            },
+        }),
+    ),
+}
+```
+
+No DiscordGo import is needed for these definitions. `Parameter` and `Choice` are
+aliases, so advanced DiscordGo fields remain available. The callback gets
 `Options`, `Resolved` objects, `User`, `Member`, `ChannelID`, and `GuildID`.
 `Member` may be nil in DMs. Autocomplete and context-menu commands are not handled.
 
@@ -58,20 +83,22 @@ roles, channels, attachments, choices, and nested subcommands. The callback gets
 - `Listen` creates or updates declared commands individually. It does not delete
   unrelated or removed commands, including commands left in an old scope.
   Registration failures close the connection without rolling back earlier updates.
-- Use `WithCommandGuildID` for development; global commands may take time to appear.
+- Use `WithCommandGuild` for development; global commands may take time to appear.
 - Invocations are deferred before the callback, with a 2.5-second acknowledgment
-  timeout. Failed acknowledgments skip execution. `Ephemeral` applies to all chunks.
+  timeout. Failed acknowledgments skip execution. `OnlyVisibleToCaller` hides
+  every response chunk from users other than the caller.
 - Empty results remove the deferred response. Failures use `ErrorMessage`, or
   remove the response when no fallback is configured.
 - Register commands before listening; duplicate names are rejected.
-  Do not mutate registered option definitions.
+  Do not mutate registered parameter definitions.
 
 ## Mentions
 
-To enable mentions, supply `WithHandler`:
+To enable mentions and replies to bot messages, supply `WithMentionReplyHandler`:
 
 ```go
-discord.WithHandler(func(ctx context.Context, message discord.Message) (string, error) {
+// Import github.com/charmingruby/erebor/discord/mention.
+discord.WithMentionReplyHandler(func(ctx context.Context, message mention.Message) (string, error) {
     return "Você disse: " + message.Content, nil
 })
 ```
@@ -84,22 +111,35 @@ refreshed every 8 seconds, and empty answers send nothing.
 `ReferencedContent` holds the previous bot reply. Treat it as untrusted data,
 not instructions, when building AI prompts.
 
+## Package boundaries
+
+- `discord` owns the connection, registration, shutdown, and reply delivery.
+- `discord/command` owns slash-command definitions and parameter helpers.
+- `discord/mention` owns mention/reply callbacks and message data.
+
+The root package imports the capability packages, never the reverse. Callbacks
+receive only their input and context; passing the whole bot is unnecessary.
+Applications can organize their own capabilities in packages that return
+`command.Definition` or `mention.Handler`.
+
 ## Shared behavior
 
 - Both features work together or independently. Supply a mention handler or at
   least one command.
-- Defaults: 8 concurrent handlers, 15-second HTTP timeout, 3-minute handler
-  timeout, and 1-minute reply timeout. Excess mentions are dropped and logged;
-  excess commands receive a private busy response.
-- Override these with `WithMaxConcurrentRequests`, `WithRequestTimeout`,
+- Defaults: 15-second HTTP timeout, 3-minute handler timeout, and 1-minute reply timeout.
+- Override these with `WithHTTPTimeout`,
   `WithHandlerTimeout`, and `WithReplyTimeout`. Explicit values must be positive;
   omitted options use defaults. Later options override earlier ones.
 - Message whitespace is preserved; only mentions of this bot are removed.
   Command payload rules are validated by Discord during registration.
 - Handlers must honor cancellation. Command execution is capped at 14 minutes
   for Discord's token lifetime. Shutdown cancels handlers and waits for them.
+- Handlers may run concurrently without a package-level limit. Applications
+  should limit expensive operations when needed; timeouts do not limit concurrency.
 - Replies use chunks of at most 2,000 UTF-16 units, preserving Unicode and
   disabling generated mentions. Only the first mention-reply chunk quotes its source.
 - Handler failures are logged and optionally send `ErrorMessage`.
 - Normal shutdown returns `nil`; an already-canceled context returns its error.
-  Concurrent listeners and command registration while listening are rejected.
+  Configure and register commands sequentially before calling `Listen`, and call
+  it only once per bot. Concurrent registration, configuration during execution,
+  and repeated or concurrent listeners are unsupported.

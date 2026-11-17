@@ -8,24 +8,9 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/charmingruby/erebor/discord/mention"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
-
-// Handler processes a mention or reply. An empty response sends no message.
-// It may be called concurrently and must return when its context is canceled.
-type Handler func(context.Context, Message) (string, error)
-
-// Message contains application-facing message data without adding prompts.
-type Message struct {
-	ID        string
-	ChannelID string
-	GuildID   string
-	AuthorID  string
-	// Content excludes mentions of this bot; other whitespace is preserved.
-	Content string
-	// ReferencedContent contains the bot response being replied to, if any.
-	ReferencedContent string
-}
 
 func (b *Bot) handleMentionOrReply(ctx context.Context, event *discordgo.MessageCreate) {
 	log := logging.LoggerFromContext(ctx)
@@ -34,18 +19,6 @@ func (b *Bot) handleMentionOrReply(ctx context.Context, event *discordgo.Message
 	if !ok {
 		return
 	}
-
-	if !b.tryAcquireSlot() {
-		log.WarnContext(ctx, "Discord bot at capacity; message ignored",
-			"message_id", message.ID,
-		)
-
-		return
-	}
-
-	defer func() {
-		<-b.slots
-	}()
 
 	log = log.With("message_id", message.ID)
 	ctx = logging.WithLogger(ctx, log)
@@ -70,16 +43,16 @@ func (b *Bot) handleMentionOrReply(ctx context.Context, event *discordgo.Message
 		return
 	}
 
-	if err := b.replyToMessage(ctx, event.Message, answer); err != nil {
+	if err := b.sendMessageReply(ctx, event.Message, answer); err != nil {
 		log.ErrorContext(ctx, ErrSendReply.Error(),
 			"error", err,
 		)
 	}
 }
 
-func parseMentionOrReply(m *discordgo.Message, botID string) (Message, bool) {
+func parseMentionOrReply(m *discordgo.Message, botID string) (mention.Message, bool) {
 	if m.Author.Bot || m.GuildID == "" {
-		return Message{}, false
+		return mention.Message{}, false
 	}
 
 	mentioned := slices.ContainsFunc(m.Mentions, func(user *discordgo.User) bool {
@@ -91,13 +64,13 @@ func parseMentionOrReply(m *discordgo.Message, botID string) (Message, bool) {
 		m.ReferencedMessage.Author.ID == botID
 
 	if !mentioned && !replied {
-		return Message{}, false
+		return mention.Message{}, false
 	}
 
 	content := strings.ReplaceAll(m.Content, "<@"+botID+">", "")
 	content = strings.ReplaceAll(content, "<@!"+botID+">", "")
 
-	message := Message{
+	message := mention.Message{
 		ID:        m.ID,
 		ChannelID: m.ChannelID,
 		GuildID:   m.GuildID,

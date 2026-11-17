@@ -10,7 +10,7 @@ import (
 
 const maxMessageUnits = 2000
 
-func (b *Bot) replyToMessage(ctx context.Context, m *discordgo.Message, answer string) error {
+func (b *Bot) sendMessageReply(ctx context.Context, m *discordgo.Message, answer string) error {
 	ctx, cancel := context.WithTimeout(ctx, b.config.ReplyTimeout)
 	defer cancel()
 
@@ -39,7 +39,7 @@ func (b *Bot) replyToMessage(ctx context.Context, m *discordgo.Message, answer s
 	return nil
 }
 
-func (b *Bot) respondToCommand(
+func (b *Bot) sendCommandReply(
 	ctx context.Context,
 	source *discordgo.Interaction,
 	answer string,

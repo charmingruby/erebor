@@ -9,11 +9,13 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/charmingruby/erebor/discord/command"
+	"github.com/charmingruby/erebor/discord/mention"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
 
 var (
-	// ErrInvalidConfig indicates a missing token, nonpositive limit, or empty bot.
+	// ErrInvalidConfig indicates a missing token, nonpositive timeout, or empty bot.
 	ErrInvalidConfig = errors.New("invalid Discord bot configuration")
 	// ErrCreateSession indicates that DiscordGo could not create a session.
 	ErrCreateSession = errors.New("create Discord bot session")
@@ -21,44 +23,39 @@ var (
 	ErrConnect = errors.New("connect Discord bot")
 	// ErrCloseSession indicates a session shutdown failure.
 	ErrCloseSession = errors.New("close Discord bot session")
-	// ErrAlreadyRunning indicates a concurrent listener on the same bot.
-	ErrAlreadyRunning = errors.New("discord bot already running")
 	// ErrSendReply indicates a failed or canceled reply.
 	ErrSendReply = errors.New("send Discord bot reply")
 )
 
 type config struct {
-	ErrorMessage          string
-	CommandGuildID        string
-	MaxConcurrentRequests int
-	RequestTimeout        time.Duration
-	HandlerTimeout        time.Duration
-	ReplyTimeout          time.Duration
+	ErrorMessage   string
+	CommandGuildID string
+	HTTPTimeout    time.Duration
+	HandlerTimeout time.Duration
+	ReplyTimeout   time.Duration
 }
 
 // Bot handles slash commands and optional guild mentions. Construct it with NewBot.
+// Configure it before listening, and call Listen only once per bot.
+// Configuration and registration are not safe for concurrent use.
 type Bot struct {
 	sess           *discordgo.Session
-	mentionHandler Handler
-	slots          chan struct{}
-	commands       map[string]Command
+	mentionHandler mention.Handler
+	commands       map[string]command.Definition
 	config         config
-	mu             sync.Mutex
-	running        bool
 }
 
 // NewBot creates a bot without opening a connection. Token is the raw bot token.
-// Mentions are disabled unless WithHandler is supplied.
+// Mentions are disabled unless WithMentionReplyHandler is supplied.
 // Register commands before calling Listen.
 func NewBot(token string, opts ...BotOption) (*Bot, error) {
 	b := &Bot{
 		config: config{
-			MaxConcurrentRequests: 8,
-			RequestTimeout:        15 * time.Second,
-			HandlerTimeout:        3 * time.Minute,
-			ReplyTimeout:          time.Minute,
+			HTTPTimeout:    15 * time.Second,
+			HandlerTimeout: 3 * time.Minute,
+			ReplyTimeout:   time.Minute,
 		},
-		commands: make(map[string]Command),
+		commands: make(map[string]command.Definition),
 	}
 
 	for _, opt := range opts {
@@ -66,8 +63,7 @@ func NewBot(token string, opts ...BotOption) (*Bot, error) {
 	}
 
 	if token == "" ||
-		b.config.MaxConcurrentRequests <= 0 ||
-		b.config.RequestTimeout <= 0 ||
+		b.config.HTTPTimeout <= 0 ||
 		b.config.HandlerTimeout <= 0 ||
 		b.config.ReplyTimeout <= 0 {
 		return nil, ErrInvalidConfig
@@ -83,10 +79,9 @@ func NewBot(token string, opts ...BotOption) (*Bot, error) {
 		sess.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
 	}
 
-	sess.Client.Timeout = b.config.RequestTimeout
+	sess.Client.Timeout = b.config.HTTPTimeout
 
 	b.sess = sess
-	b.slots = make(chan struct{}, b.config.MaxConcurrentRequests)
 
 	return b, nil
 }
@@ -104,31 +99,16 @@ func (b *Bot) botID() string {
 
 // Listen connects and registers commands, then handles interactions and mentions
 // until ctx is canceled. It cancels active handlers and waits for them to finish.
-// Normal cancellation returns nil. Concurrent calls return ErrAlreadyRunning.
+// Normal cancellation returns nil. Call Listen only once per bot, after all
+// configuration and command registration are complete.
 func (b *Bot) Listen(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	b.mu.Lock()
-	if b.running {
-		b.mu.Unlock()
-		return ErrAlreadyRunning
-	}
-
 	if b.mentionHandler == nil && len(b.commands) == 0 {
-		b.mu.Unlock()
 		return ErrInvalidConfig
 	}
-
-	b.running = true
-	b.mu.Unlock()
-
-	defer func() {
-		b.mu.Lock()
-		b.running = false
-		b.mu.Unlock()
-	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -136,7 +116,9 @@ func (b *Bot) Listen(ctx context.Context) error {
 	var callbackMu sync.Mutex
 	var callbacks sync.WaitGroup
 
-	trackCallback := func(handle func()) {
+	// Serialize callback admission with shutdown so Add cannot race with Wait
+	// after cancellation, including callbacks already dispatched by the session.
+	runTrackedHandler := func(handle func()) {
 		callbackMu.Lock()
 
 		if ctx.Err() != nil {
@@ -156,7 +138,7 @@ func (b *Bot) Listen(ctx context.Context) error {
 
 	if b.mentionHandler != nil {
 		removers = append(removers, b.sess.AddHandler(func(_ *discordgo.Session, event *discordgo.MessageCreate) {
-			trackCallback(func() {
+			runTrackedHandler(func() {
 				b.handleMentionOrReply(ctx, event)
 			})
 		}))
@@ -164,13 +146,13 @@ func (b *Bot) Listen(ctx context.Context) error {
 
 	if len(b.commands) != 0 {
 		removers = append(removers, b.sess.AddHandler(func(_ *discordgo.Session, event *discordgo.InteractionCreate) {
-			trackCallback(func() {
+			runTrackedHandler(func() {
 				b.handleCommand(ctx, event)
 			})
 		}))
 	}
 
-	err := b.connectAndWait(ctx)
+	err := b.runSession(ctx)
 
 	for _, remove := range removers {
 		remove()
@@ -189,7 +171,7 @@ func (b *Bot) Listen(ctx context.Context) error {
 	return err
 }
 
-func (b *Bot) connectAndWait(ctx context.Context) error {
+func (b *Bot) runSession(ctx context.Context) error {
 	if err := b.sess.Open(); err != nil {
 		return fmt.Errorf("%w: %w", ErrConnect, err)
 	}
@@ -202,13 +184,4 @@ func (b *Bot) connectAndWait(ctx context.Context) error {
 	<-ctx.Done()
 
 	return nil
-}
-
-func (b *Bot) tryAcquireSlot() bool {
-	select {
-	case b.slots <- struct{}{}:
-		return true
-	default:
-		return false
-	}
 }
