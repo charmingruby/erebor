@@ -3,6 +3,7 @@ module github.com/charmingruby/erebor
 go 1.27.0
 
 require (
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/caarlos0/env v3.5.0+incompatible
 	github.com/firebase/genkit/go v1.14.0
 	github.com/go-chi/chi/v5 v5.5.0
