@@ -24,7 +24,11 @@ func WithErrorMessage(message string) BotOption {
 	}
 }
 
-// WithCommandGuild limits command registration to a guild. Empty means global.
+// WithCommandGuild limits command registration to a guild. On Listen, a nonempty
+// ID removes all global commands and replaces all commands in that guild.
+// This affects every instance sharing the Discord application, including production.
+// Commands in other guilds are not removed. Empty means global registration
+// without deleting existing commands.
 func WithCommandGuild(guildID string) BotOption {
 	return func(b *Bot) {
 		b.config.CommandGuildID = guildID

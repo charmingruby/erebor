@@ -80,10 +80,15 @@ aliases, so advanced DiscordGo fields remain available. The callback gets
 
 - Install with the `bot` and `applications.commands` OAuth scopes. Command-only
   bots do not need Message Content Intent.
-- `Listen` creates or updates declared commands individually. It does not delete
-  unrelated or removed commands, including commands left in an old scope.
-  Registration failures close the connection without rolling back earlier updates.
-- Use `WithCommandGuild` for development; global commands may take time to appear.
+- With a nonempty `WithCommandGuild`, `Listen` deletes **all global commands**
+  for the application, then bulk overwrites the configured guild's commands with
+  the current definitions. Removed or renamed commands disappear; an empty list
+  clears that guild's commands. Commands in other guilds are not removed.
+  **Do not share the application with production if it relies on global commands.**
+- Without a command guild, `Listen` creates or updates global commands individually,
+  preserving unrelated or removed commands. Global commands may take time to appear.
+- Registration failures close the connection without rolling back earlier updates,
+  including global command cleanup.
 - Invocations are deferred before the callback, with a 2.5-second acknowledgment
   timeout. Failed acknowledgments skip execution. `OnlyVisibleToCaller` hides
   every response chunk from users other than the caller.

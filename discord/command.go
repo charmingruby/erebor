@@ -21,9 +21,10 @@ var (
 	ErrRegisterCommand = errors.New("register Discord command")
 )
 
-// RegisterCommand adds a local definition. Listen creates or updates commands
-// individually in Discord, preserving unrelated commands. Duplicate local names
-// are rejected. Register commands sequentially before calling Listen.
+// RegisterCommand adds a local definition. With a command guild, Listen removes
+// all global commands and replaces the guild's commands with the local definitions.
+// Otherwise, it creates or updates global commands, preserving unrelated commands.
+// Duplicate local names are rejected. Register commands before calling Listen.
 func (b *Bot) RegisterCommand(definition command.Definition) error {
 	if definition.Name == "" || definition.Handler == nil {
 		return ErrInvalidCommand
@@ -39,24 +40,52 @@ func (b *Bot) RegisterCommand(definition command.Definition) error {
 }
 
 func (b *Bot) publishCommands(ctx context.Context) error {
+	commands := make([]*discordgo.ApplicationCommand, 0, len(b.commands))
+
 	for _, name := range slices.Sorted(maps.Keys(b.commands)) {
 		definition := b.commands[name]
+		commands = append(commands, &discordgo.ApplicationCommand{
 
+			Name:        definition.Name,
+			Description: definition.Description,
+			Type:        discordgo.ChatApplicationCommand,
+			Options:     definition.Parameters,
+		})
+	}
+
+	if b.config.CommandGuildID != "" {
+		if err := b.overwriteCommands(ctx, "", []*discordgo.ApplicationCommand{}); err != nil {
+			return err
+		}
+
+		return b.overwriteCommands(ctx, b.config.CommandGuildID, commands)
+	}
+
+	for _, cmd := range commands {
 		ctx, cancel := context.WithTimeout(ctx, b.config.HTTPTimeout)
 
-		_, err := b.sess.ApplicationCommandCreate(b.botID(), b.config.CommandGuildID,
-			&discordgo.ApplicationCommand{
-				Name:        definition.Name,
-				Description: definition.Description,
-				Type:        discordgo.ChatApplicationCommand,
-				Options:     definition.Parameters,
-			}, discordgo.WithContext(ctx))
+		_, err := b.sess.ApplicationCommandCreate(b.botID(), "", cmd, discordgo.WithContext(ctx))
 
 		cancel()
 
 		if err != nil {
-			return fmt.Errorf("%w %q: %w", ErrRegisterCommand, name, err)
+			return fmt.Errorf("%w %q: %w", ErrRegisterCommand, cmd.Name, err)
 		}
+	}
+
+	return nil
+}
+
+func (b *Bot) overwriteCommands(ctx context.Context, guildID string, commands []*discordgo.ApplicationCommand) error {
+	ctx, cancel := context.WithTimeout(ctx, b.config.HTTPTimeout)
+	defer cancel()
+
+	_, err := b.sess.ApplicationCommandBulkOverwrite(b.botID(), guildID, commands, discordgo.WithContext(ctx))
+	if err != nil {
+		if guildID == "" {
+			return fmt.Errorf("%w: clear global commands: %w", ErrRegisterCommand, err)
+		}
+		return fmt.Errorf("%w: replace commands in guild %q: %w", ErrRegisterCommand, guildID, err)
 	}
 
 	return nil
