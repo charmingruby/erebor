@@ -32,13 +32,13 @@ err = bot.RegisterCommand(command.Definition{
             Required: true,
         }),
     },
-    Handler: func(ctx context.Context, interaction command.Interaction) (string, error) {
+    Handler: func(ctx context.Context, interaction command.Interaction) (command.Response, error) {
         for _, option := range interaction.Options {
             if option.Name == "text" {
-                return option.StringValue(), nil
+                return command.Response{Content: option.StringValue()}, nil
             }
         }
-        return "", nil
+        return command.Response{}, nil
     },
 })
 if err != nil {
@@ -55,23 +55,73 @@ Build parameters with `command.String`, `command.Integer`, `command.Number`,
 or `command.Attachment`. Each accepts a `command.Parameter` with explicit fields
 and sets its Discord type. Parameters are optional unless `Required: true` is set.
 String, integer, and number parameters support `Choices`.
-Use `command.Subcommand` and `SubcommandGroup` for nested actions:
+
+To include an image, return its URL alongside the text:
 
 ```go
-parameters := []*command.Parameter{
-    command.Subcommand("set", "Define uma preferência",
-        command.String(command.Parameter{
-            Name: "language",
-            Description: "Idioma",
-            Required: true,
-            Choices: []*command.Choice{
-                {Name: "Português", Value: "pt"},
-                {Name: "English", Value: "en"},
+return command.Response{
+    Content: "Pikachu!",
+    ImageURL: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png",
+}, nil
+```
+
+`ImageURL` is optional and must point to a publicly accessible HTTP(S) image.
+Erebor displays it as an embed on the first message, without downloading it.
+Image-only replies are supported; an empty `command.Response{}` removes the reply.
+
+## Subcommands
+
+Use `Subcommands` to group actions under one command. Each action is another
+`command.Definition`, with its own handler and parameters.
+
+Before calling `Listen`, register `/tools ping` and `/tools echo text:hello`:
+
+```go
+err = bot.RegisterCommand(command.Definition{
+    Name: "tools",
+    Description: "Comandos utilitários",
+    Subcommands: []command.Definition{
+        {
+            Name: "ping",
+            Description: "Verifica se o bot está respondendo",
+            Handler: func(context.Context, command.Interaction) (command.Response, error) {
+                return command.Response{Content: "pong"}, nil
             },
-        }),
-    ),
+        },
+        {
+            Name: "echo",
+            Description: "Retorna o texto informado",
+            Parameters: []*command.Parameter{
+                command.String(command.Parameter{
+                    Name: "text",
+                    Description: "Texto para retornar",
+                    Required: true,
+                }),
+            },
+            Handler: func(_ context.Context, i command.Interaction) (command.Response, error) {
+                for _, option := range i.Options {
+                    if option.Name == "text" {
+                        return command.Response{Content: option.StringValue()}, nil
+                    }
+                }
+                return command.Response{}, nil
+            },
+        },
+    },
+})
+if err != nil {
+    return err
 }
 ```
+
+- Use either `Handler` with optional `Parameters`, or `Subcommands`, never both.
+- Erebor calls the selected handler with only its parameters in `i.Options`.
+  `i.Name` remains the root name (`tools`).
+- Set `OnlyVisibleToCaller` on the root to apply it to every action.
+- For subcommand groups, nest `Subcommands` once more. Discord allows at most
+  `/command group action`.
+
+## Command behavior
 
 No DiscordGo import is needed for these definitions. `Parameter` and `Choice` are
 aliases, so advanced DiscordGo fields remain available. The callback gets

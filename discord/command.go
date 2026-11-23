@@ -21,20 +21,27 @@ var (
 	ErrRegisterCommand = errors.New("register Discord command")
 )
 
+type registeredCommand struct {
+	definition          *discordgo.ApplicationCommand
+	handler             command.Handler
+	onlyVisibleToCaller bool
+}
+
 // RegisterCommand adds a local definition. With a command guild, Listen removes
 // all global commands and replaces the guild's commands with the local definitions.
 // Otherwise, it creates or updates global commands, preserving unrelated commands.
 // Duplicate local names are rejected. Register commands before calling Listen.
 func (b *Bot) RegisterCommand(definition command.Definition) error {
-	if definition.Name == "" || definition.Handler == nil {
-		return ErrInvalidCommand
+	registered, err := compileCommand(definition)
+	if err != nil {
+		return err
 	}
 
 	if _, exists := b.commands[definition.Name]; exists {
 		return fmt.Errorf("%w: duplicate name %q", ErrInvalidCommand, definition.Name)
 	}
 
-	b.commands[definition.Name] = definition
+	b.commands[definition.Name] = registered
 
 	return nil
 }
@@ -43,14 +50,7 @@ func (b *Bot) publishCommands(ctx context.Context) error {
 	commands := make([]*discordgo.ApplicationCommand, 0, len(b.commands))
 
 	for _, name := range slices.Sorted(maps.Keys(b.commands)) {
-		definition := b.commands[name]
-		commands = append(commands, &discordgo.ApplicationCommand{
-
-			Name:        definition.Name,
-			Description: definition.Description,
-			Type:        discordgo.ChatApplicationCommand,
-			Options:     definition.Parameters,
-		})
+		commands = append(commands, b.commands[name].definition)
 	}
 
 	if b.config.CommandGuildID != "" {
@@ -110,7 +110,7 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 	ctx = logging.WithLogger(ctx, log)
 
 	var flags discordgo.MessageFlags
-	if definition.OnlyVisibleToCaller {
+	if definition.onlyVisibleToCaller {
 		flags = discordgo.MessageFlagsEphemeral
 	}
 
@@ -133,7 +133,7 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 	handlerCtx, cancel := context.WithTimeout(ctx, min(b.config.HandlerTimeout, 14*time.Minute))
 	defer cancel()
 
-	answer, err := definition.Handler(handlerCtx, command.Interaction{
+	answer, err := definition.handler(handlerCtx, command.Interaction{
 		ID:        event.ID,
 		Name:      data.Name,
 		GuildID:   event.GuildID,
@@ -146,7 +146,7 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 	cancel()
 	if err != nil {
 		log.ErrorContext(ctx, "handle Discord command", "error", err)
-		answer = b.config.ErrorMessage
+		answer = command.Response{Content: b.config.ErrorMessage}
 	}
 
 	if ctx.Err() != nil {
@@ -169,4 +169,73 @@ func (b *Bot) sendInitialResponse(
 	defer cancel()
 
 	return b.sess.InteractionRespond(interaction, response, discordgo.WithContext(ctx))
+}
+
+func compileCommand(def command.Definition) (registeredCommand, error) {
+	compiled := registeredCommand{
+		definition: &discordgo.ApplicationCommand{
+			Name:        def.Name,
+			Description: def.Description,
+			Type:        discordgo.ChatApplicationCommand,
+			Options:     def.Parameters,
+		},
+		handler:             def.Handler,
+		onlyVisibleToCaller: def.OnlyVisibleToCaller,
+	}
+
+	if len(def.Subcommands) == 0 {
+		if def.Handler == nil {
+			return registeredCommand{}, fmt.Errorf("%w: command %q needs a handler", ErrInvalidCommand, def.Name)
+		}
+		return compiled, nil
+	}
+
+	if def.Handler != nil || len(def.Parameters) > 0 {
+		return registeredCommand{}, fmt.Errorf("%w: command %q cannot combine subcommands with a handler or parameters", ErrInvalidCommand, def.Name)
+	}
+
+	handlers := make(map[string]command.Handler, len(def.Subcommands))
+
+	for _, sub := range def.Subcommands {
+		if _, exists := handlers[sub.Name]; exists {
+			return registeredCommand{}, fmt.Errorf("%w: duplicate subcommand %q in %q", ErrInvalidCommand, sub.Name, def.Name)
+		}
+
+		child, err := compileCommand(sub)
+		if err != nil {
+			return registeredCommand{}, fmt.Errorf("command %q: %w", def.Name, err)
+		}
+
+		optionType := discordgo.ApplicationCommandOptionSubCommand
+		if len(sub.Subcommands) > 0 {
+			optionType = discordgo.ApplicationCommandOptionSubCommandGroup
+		}
+
+		handlers[sub.Name] = child.handler
+		compiled.definition.Options = append(compiled.definition.Options, &command.Parameter{
+			Type:        optionType,
+			Name:        sub.Name,
+			Description: sub.Description,
+			Options:     child.definition.Options,
+		})
+	}
+
+	compiled.handler = func(ctx context.Context, interaction command.Interaction) (command.Response, error) {
+		if len(interaction.Options) != 1 || interaction.Options[0] == nil {
+			return command.Response{}, fmt.Errorf("%w: expected one subcommand", ErrInvalidCommand)
+		}
+
+		sub := interaction.Options[0]
+		handle, exists := handlers[sub.Name]
+
+		if !exists {
+			return command.Response{}, fmt.Errorf("%w: unknown subcommand %q", ErrInvalidCommand, sub.Name)
+		}
+
+		interaction.Options = sub.Options
+
+		return handle(ctx, interaction)
+	}
+
+	return compiled, nil
 }

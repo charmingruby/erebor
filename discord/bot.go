@@ -9,7 +9,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/charmingruby/erebor/discord/command"
 	"github.com/charmingruby/erebor/discord/mention"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
@@ -41,7 +40,7 @@ type config struct {
 type Bot struct {
 	sess           *discordgo.Session
 	mentionHandler mention.Handler
-	commands       map[string]command.Definition
+	commands       map[string]registeredCommand
 	config         config
 }
 
@@ -55,7 +54,7 @@ func NewBot(token string, opts ...BotOption) (*Bot, error) {
 			HandlerTimeout: 3 * time.Minute,
 			ReplyTimeout:   time.Minute,
 		},
-		commands: make(map[string]command.Definition),
+		commands: make(map[string]registeredCommand),
 	}
 
 	for _, opt := range opts {

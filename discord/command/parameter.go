@@ -2,7 +2,7 @@ package command
 
 import "github.com/bwmarrin/discordgo"
 
-// Parameter defines a command argument or subcommand. The alias preserves
+// Parameter defines a command argument. The alias preserves
 // advanced DiscordGo fields; typed helpers set Type automatically.
 type Parameter = discordgo.ApplicationCommandOption
 
@@ -61,24 +61,4 @@ func Mentionable(parameter Parameter) *Parameter {
 func Attachment(parameter Parameter) *Parameter {
 	parameter.Type = discordgo.ApplicationCommandOptionAttachment
 	return &parameter
-}
-
-// Subcommand groups parameters under a command action.
-func Subcommand(name, description string, parameters ...*Parameter) *Parameter {
-	return &Parameter{
-		Type:        discordgo.ApplicationCommandOptionSubCommand,
-		Name:        name,
-		Description: description,
-		Options:     parameters,
-	}
-}
-
-// SubcommandGroup groups related subcommands. Its children must be subcommands.
-func SubcommandGroup(name, description string, subcommands ...*Parameter) *Parameter {
-	return &Parameter{
-		Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
-		Name:        name,
-		Description: description,
-		Options:     subcommands,
-	}
 }

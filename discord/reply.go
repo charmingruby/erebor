@@ -6,6 +6,8 @@ import (
 	"unicode/utf16"
 
 	"github.com/bwmarrin/discordgo"
+
+	"github.com/charmingruby/erebor/discord/command"
 )
 
 const maxMessageUnits = 2000
@@ -42,24 +44,36 @@ func (b *Bot) sendMessageReply(ctx context.Context, m *discordgo.Message, answer
 func (b *Bot) sendCommandReply(
 	ctx context.Context,
 	source *discordgo.Interaction,
-	answer string,
+	answer command.Response,
 	flags discordgo.MessageFlags,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, b.config.ReplyTimeout)
 	defer cancel()
 
-	if answer == "" {
+	if answer.Content == "" && answer.ImageURL == "" {
 		return b.sess.InteractionResponseDelete(source, discordgo.WithContext(ctx))
 	}
 
-	for i, chunk := range splitMessage(answer) {
+	chunks := splitMessage(answer.Content)
+	if len(chunks) == 0 {
+		chunks = []string{""}
+	}
+
+	for i, chunk := range chunks {
 		if i == 0 {
-			if _, err := b.sess.InteractionResponseEdit(source, &discordgo.WebhookEdit{
+			edit := &discordgo.WebhookEdit{
 				Content: new(chunk),
 				AllowedMentions: &discordgo.MessageAllowedMentions{
 					Parse: []discordgo.AllowedMentionType{},
 				},
-			}, discordgo.WithContext(ctx)); err != nil {
+			}
+			if answer.ImageURL != "" {
+				edit.Embeds = new([]*discordgo.MessageEmbed{{
+					Image: &discordgo.MessageEmbedImage{URL: answer.ImageURL},
+				}})
+			}
+
+			if _, err := b.sess.InteractionResponseEdit(source, edit, discordgo.WithContext(ctx)); err != nil {
 				return err
 			}
 			continue
