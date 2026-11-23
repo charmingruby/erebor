@@ -42,12 +42,15 @@ func New(token string, options ...Option) (*Bot, error) {
 		handlerTimeout: 3 * time.Minute,
 		replyTimeout:   time.Minute,
 	}
+
 	for _, option := range options {
 		option(&cfg)
 	}
+
 	if token == "" || cfg.httpTimeout <= 0 || cfg.handlerTimeout <= 0 || cfg.replyTimeout <= 0 {
 		return nil, ErrInvalidConfig
 	}
+
 	if cfg.mentionHandler == nil && len(cfg.commands) == 0 {
 		return nil, fmt.Errorf("%w: provide commands or a mention handler", ErrInvalidConfig)
 	}
@@ -56,11 +59,13 @@ func New(token string, options ...Option) (*Bot, error) {
 		config:   cfg,
 		commands: make(map[string]registeredCommand),
 	}
+
 	for _, definition := range cfg.commands {
 		if err := b.registerCommand(definition); err != nil {
 			return nil, err
 		}
 	}
+
 	b.config.commands = nil
 
 	sess, err := discordgo.New("Bot " + token)

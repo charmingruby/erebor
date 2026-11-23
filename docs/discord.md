@@ -135,8 +135,11 @@ The typing indicator is refreshed while the handler runs.
 ## Responses, errors, and shutdown
 
 - `api.Response{Content: "...", ImageURLs: []string{"https://example.com/1.png", "https://example.com/2.png"}}`
-  sends text and/or public images. Images are sent in order, up to 10 per message.
-  Additional images are sent as follow-up messages with the same visibility.
+  sends text and/or a native image gallery using Discord Components V2.
+  Text uses TextDisplay; images use MediaGallery instead of individual embeds.
+  Gallery layout is controlled by the Discord client.
+  Images are sent in order, up to 10 per gallery/message.
+  Additional images are sent as follow-up galleries with the same visibility.
   Text is still split into chunks of up to 2,000 UTF-16 units.
   This replaces the former `ImageURL` field; use a one-element slice for a single image.
 - Commands are acknowledged before the handler runs. An empty response removes
@@ -173,6 +176,25 @@ are not changed. Failures do not roll back earlier updates.
 - `reply.go`: delivery, text splitting, and mention safety.
 - `internal/codec`: conversion between DiscordGo and public contracts.
 - `api`: application-facing commands, parameters, responses, mentions, and entities.
+
+### Reply delivery internals
+
+`reply.go` keeps payload construction separate from network delivery:
+
+- **Mention/reply path:** `handleMentionOrReply` calls `sendMessageReply` to send
+  plain-text chunks, referencing the user's message only in the first chunk.
+- **Command path:** `handleCommand` calls `sendCommandReply` after acknowledging
+  the interaction. This method owns batching, the delivery timeout, and error wrapping.
+  For each batch, it calls `buildCommandReplyComponents`, a pure payload builder
+  that places `TextDisplay` before the optional `MediaGallery`.
+- **Initial command response:** `sendCommandReply` calls `editInitialCommandReply`
+  once to replace the deferred response. This isolates the DiscordGo v0.29.0
+  workaround: `WebhookEdit` lacks `Flags`, so the library's REST client sets the
+  required Components V2 flag. The visibility chosen at acknowledgment is preserved.
+- **Remaining command batches:** `sendCommandReply` sends them directly with
+  `FollowupMessageCreate`, keeping the same visibility and Components V2 flag.
+- **Shared utilities:** `splitMessage` handles UTF-16 text limits for both paths;
+  `noMentions` disables automatic mention parsing on outgoing messages.
 
 Supply commands with `WithCommands`, which accepts multiple commands and appends
 them across repeated calls. Other options use the last supplied value.
