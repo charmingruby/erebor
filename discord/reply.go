@@ -10,7 +10,10 @@ import (
 	"github.com/charmingruby/erebor/discord/api"
 )
 
-const maxMessageUnits = 2000
+const (
+	maxMessageUnits  = 2000
+	maxMessageEmbeds = 10
+)
 
 func (b *Bot) sendMessageReply(ctx context.Context, m *discordgo.Message, answer string) error {
 	ctx, cancel := context.WithTimeout(ctx, b.config.replyTimeout)
@@ -53,25 +56,33 @@ func (b *Bot) sendCommandReply(
 	ctx, cancel := context.WithTimeout(ctx, b.config.replyTimeout)
 	defer cancel()
 
-	if answer.Content == "" && answer.ImageURL == "" {
+	if answer.Content == "" && len(answer.ImageURLs) == 0 {
 		return b.sess.InteractionResponseDelete(source, discordgo.WithContext(ctx))
 	}
 
 	chunks := splitMessage(answer.Content)
-	if len(chunks) == 0 {
-		chunks = []string{""}
-	}
+	imageURLs := answer.ImageURLs
+	for i := 0; i < len(chunks) || len(imageURLs) > 0; i++ {
+		var chunk string
+		if i < len(chunks) {
+			chunk = chunks[i]
+		}
+		count := min(len(imageURLs), maxMessageEmbeds)
+		var embeds []*discordgo.MessageEmbed
+		for _, url := range imageURLs[:count] {
+			embeds = append(embeds, &discordgo.MessageEmbed{
+				Image: &discordgo.MessageEmbedImage{URL: url},
+			})
+		}
+		imageURLs = imageURLs[count:]
 
-	for i, chunk := range chunks {
 		if i == 0 {
 			edit := &discordgo.WebhookEdit{
 				Content:         new(chunk),
 				AllowedMentions: noMentions(),
 			}
-			if answer.ImageURL != "" {
-				edit.Embeds = new([]*discordgo.MessageEmbed{{
-					Image: &discordgo.MessageEmbedImage{URL: answer.ImageURL},
-				}})
+			if len(embeds) > 0 {
+				edit.Embeds = new(embeds)
 			}
 
 			if _, err := b.sess.InteractionResponseEdit(source, edit, discordgo.WithContext(ctx)); err != nil {
@@ -82,6 +93,7 @@ func (b *Bot) sendCommandReply(
 
 		if _, err := b.sess.FollowupMessageCreate(source, true, &discordgo.WebhookParams{
 			Content:         chunk,
+			Embeds:          embeds,
 			Flags:           flags,
 			AllowedMentions: noMentions(),
 		}, discordgo.WithContext(ctx)); err != nil {

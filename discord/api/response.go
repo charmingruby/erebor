@@ -1,9 +1,10 @@
 package api
 
-// Response contains command reply text and an optional image displayed below it.
-// ImageURL must be a publicly accessible HTTP(S) image URL.
+// Response contains command reply text and optional images displayed below it.
+// ImageURLs must be publicly accessible HTTP(S) image URLs.
+// Images are sent in order, with at most 10 per message.
 // An empty response removes the deferred command response.
 type Response struct {
-	Content  string
-	ImageURL string
+	Content   string
+	ImageURLs []string
 }

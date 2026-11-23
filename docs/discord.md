@@ -134,8 +134,11 @@ The typing indicator is refreshed while the handler runs.
 
 ## Responses, errors, and shutdown
 
-- `api.Response{Content: "...", ImageURL: "https://..."}` sends text and/or
-  a public image. Images appear in the first chunk.
+- `api.Response{Content: "...", ImageURLs: []string{"https://example.com/1.png", "https://example.com/2.png"}}`
+  sends text and/or public images. Images are sent in order, up to 10 per message.
+  Additional images are sent as follow-up messages with the same visibility.
+  Text is still split into chunks of up to 2,000 UTF-16 units.
+  This replaces the former `ImageURL` field; use a one-element slice for a single image.
 - Commands are acknowledged before the handler runs. An empty response removes
   the deferred response; for mentions, an empty response sends nothing.
 - Text is split into chunks of at most 2,000 UTF-16 units without splitting characters.
