@@ -7,21 +7,19 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/charmingruby/erebor/discord/command"
+	"github.com/charmingruby/erebor/discord/api"
 )
 
 const maxMessageUnits = 2000
 
 func (b *Bot) sendMessageReply(ctx context.Context, m *discordgo.Message, answer string) error {
-	ctx, cancel := context.WithTimeout(ctx, b.config.ReplyTimeout)
+	ctx, cancel := context.WithTimeout(ctx, b.config.replyTimeout)
 	defer cancel()
 
 	for i, chunk := range splitMessage(answer) {
 		out := &discordgo.MessageSend{
-			Content: chunk,
-			AllowedMentions: &discordgo.MessageAllowedMentions{
-				Parse: []discordgo.AllowedMentionType{},
-			},
+			Content:         chunk,
+			AllowedMentions: noMentions(),
 		}
 
 		if i == 0 {
@@ -44,10 +42,15 @@ func (b *Bot) sendMessageReply(ctx context.Context, m *discordgo.Message, answer
 func (b *Bot) sendCommandReply(
 	ctx context.Context,
 	source *discordgo.Interaction,
-	answer command.Response,
+	answer api.Response,
 	flags discordgo.MessageFlags,
-) error {
-	ctx, cancel := context.WithTimeout(ctx, b.config.ReplyTimeout)
+) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %w", ErrSendReply, err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, b.config.replyTimeout)
 	defer cancel()
 
 	if answer.Content == "" && answer.ImageURL == "" {
@@ -62,10 +65,8 @@ func (b *Bot) sendCommandReply(
 	for i, chunk := range chunks {
 		if i == 0 {
 			edit := &discordgo.WebhookEdit{
-				Content: new(chunk),
-				AllowedMentions: &discordgo.MessageAllowedMentions{
-					Parse: []discordgo.AllowedMentionType{},
-				},
+				Content:         new(chunk),
+				AllowedMentions: noMentions(),
 			}
 			if answer.ImageURL != "" {
 				edit.Embeds = new([]*discordgo.MessageEmbed{{
@@ -80,17 +81,19 @@ func (b *Bot) sendCommandReply(
 		}
 
 		if _, err := b.sess.FollowupMessageCreate(source, true, &discordgo.WebhookParams{
-			Content: chunk,
-			Flags:   flags,
-			AllowedMentions: &discordgo.MessageAllowedMentions{
-				Parse: []discordgo.AllowedMentionType{},
-			},
+			Content:         chunk,
+			Flags:           flags,
+			AllowedMentions: noMentions(),
 		}, discordgo.WithContext(ctx)); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func noMentions() *discordgo.MessageAllowedMentions {
+	return &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
 }
 
 func splitMessage(text string) []string {

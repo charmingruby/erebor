@@ -2,95 +2,16 @@ package discord
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"maps"
-	"slices"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/charmingruby/erebor/discord/command"
+	"github.com/charmingruby/erebor/discord/api"
+	"github.com/charmingruby/erebor/discord/internal/codec"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
 
-var (
-	// ErrInvalidCommand indicates an invalid definition or a duplicate name.
-	ErrInvalidCommand = errors.New("invalid Discord command")
-	// ErrRegisterCommand indicates a command registration failure.
-	ErrRegisterCommand = errors.New("register Discord command")
-)
-
-type registeredCommand struct {
-	definition          *discordgo.ApplicationCommand
-	handler             command.Handler
-	onlyVisibleToCaller bool
-}
-
-// RegisterCommand adds a local definition. With a command guild, Listen removes
-// all global commands and replaces the guild's commands with the local definitions.
-// Otherwise, it creates or updates global commands, preserving unrelated commands.
-// Duplicate local names are rejected. Register commands before calling Listen.
-func (b *Bot) RegisterCommand(definition command.Definition) error {
-	registered, err := compileCommand(definition)
-	if err != nil {
-		return err
-	}
-
-	if _, exists := b.commands[definition.Name]; exists {
-		return fmt.Errorf("%w: duplicate name %q", ErrInvalidCommand, definition.Name)
-	}
-
-	b.commands[definition.Name] = registered
-
-	return nil
-}
-
-func (b *Bot) publishCommands(ctx context.Context) error {
-	commands := make([]*discordgo.ApplicationCommand, 0, len(b.commands))
-
-	for _, name := range slices.Sorted(maps.Keys(b.commands)) {
-		commands = append(commands, b.commands[name].definition)
-	}
-
-	if b.config.CommandGuildID != "" {
-		if err := b.overwriteCommands(ctx, "", []*discordgo.ApplicationCommand{}); err != nil {
-			return err
-		}
-
-		return b.overwriteCommands(ctx, b.config.CommandGuildID, commands)
-	}
-
-	for _, cmd := range commands {
-		ctx, cancel := context.WithTimeout(ctx, b.config.HTTPTimeout)
-
-		_, err := b.sess.ApplicationCommandCreate(b.botID(), "", cmd, discordgo.WithContext(ctx))
-
-		cancel()
-
-		if err != nil {
-			return fmt.Errorf("%w %q: %w", ErrRegisterCommand, cmd.Name, err)
-		}
-	}
-
-	return nil
-}
-
-func (b *Bot) overwriteCommands(ctx context.Context, guildID string, commands []*discordgo.ApplicationCommand) error {
-	ctx, cancel := context.WithTimeout(ctx, b.config.HTTPTimeout)
-	defer cancel()
-
-	_, err := b.sess.ApplicationCommandBulkOverwrite(b.botID(), guildID, commands, discordgo.WithContext(ctx))
-	if err != nil {
-		if guildID == "" {
-			return fmt.Errorf("%w: clear global commands: %w", ErrRegisterCommand, err)
-		}
-		return fmt.Errorf("%w: replace commands in guild %q: %w", ErrRegisterCommand, guildID, err)
-	}
-
-	return nil
-}
-
+// Command flow: select → acknowledge → execute → deliver.
 func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCreate) {
 	if event.Type != discordgo.InteractionApplicationCommand {
 		return
@@ -102,7 +23,7 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 	}
 
 	definition, ok := b.commands[data.Name]
-	if !ok || (b.config.CommandGuildID != "" && event.GuildID != b.config.CommandGuildID) {
+	if !ok || (b.config.commandGuildID != "" && event.GuildID != b.config.commandGuildID) {
 		return
 	}
 
@@ -114,39 +35,15 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 		flags = discordgo.MessageFlagsEphemeral
 	}
 
-	response := &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags: flags,
-		},
-	}
-	if err := b.sendInitialResponse(ctx, event.Interaction, response); err != nil {
-		log.ErrorContext(ctx, "respond to Discord interaction", "error", err)
+	if err := b.acknowledgeCommand(ctx, event.Interaction, flags); err != nil {
+		log.ErrorContext(ctx, "acknowledge Discord command", "error", err)
 		return
 	}
 
-	user := event.User
-	if event.Member != nil {
-		user = event.Member.User
-	}
-
-	handlerCtx, cancel := context.WithTimeout(ctx, min(b.config.HandlerTimeout, 14*time.Minute))
-	defer cancel()
-
-	answer, err := definition.handler(handlerCtx, command.Interaction{
-		ID:        event.ID,
-		Name:      data.Name,
-		GuildID:   event.GuildID,
-		ChannelID: event.ChannelID,
-		User:      user,
-		Member:    event.Member,
-		Options:   data.Options,
-		Resolved:  data.Resolved,
-	})
-	cancel()
+	answer, err := b.executeCommand(ctx, definition.handler, codec.Interaction(event, data))
 	if err != nil {
 		log.ErrorContext(ctx, "handle Discord command", "error", err)
-		answer = command.Response{Content: b.config.ErrorMessage}
+		answer = api.Response{Content: b.config.errorMessage}
 	}
 
 	if ctx.Err() != nil {
@@ -154,88 +51,32 @@ func (b *Bot) handleCommand(ctx context.Context, event *discordgo.InteractionCre
 	}
 
 	if err := b.sendCommandReply(ctx, event.Interaction, answer, flags); err != nil {
-		log.ErrorContext(ctx, "respond to Discord interaction", "error", err)
+		log.ErrorContext(ctx, "reply to Discord command", "error", err)
 	}
 }
 
-func (b *Bot) sendInitialResponse(
+func (b *Bot) executeCommand(
 	ctx context.Context,
-	interaction *discordgo.Interaction,
-	response *discordgo.InteractionResponse,
-) error {
-	// Discord requires the initial response within 3 seconds. Acknowledge before
-	// executing the handler.
-	ctx, cancel := context.WithTimeout(ctx, min(b.config.HTTPTimeout, 2500*time.Millisecond))
+	handler api.CommandHandler,
+	input api.Interaction,
+) (api.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, min(b.config.handlerTimeout, 14*time.Minute))
 	defer cancel()
 
-	return b.sess.InteractionRespond(interaction, response, discordgo.WithContext(ctx))
+	return handler(ctx, input)
 }
 
-func compileCommand(def command.Definition) (registeredCommand, error) {
-	compiled := registeredCommand{
-		definition: &discordgo.ApplicationCommand{
-			Name:        def.Name,
-			Description: def.Description,
-			Type:        discordgo.ChatApplicationCommand,
-			Options:     def.Parameters,
-		},
-		handler:             def.Handler,
-		onlyVisibleToCaller: def.OnlyVisibleToCaller,
-	}
+func (b *Bot) acknowledgeCommand(
+	ctx context.Context,
+	interaction *discordgo.Interaction,
+	flags discordgo.MessageFlags,
+) error {
+	// Discord requires acknowledgment within 3 seconds, before running user code.
+	ctx, cancel := context.WithTimeout(ctx, min(b.config.httpTimeout, 2500*time.Millisecond))
+	defer cancel()
 
-	if len(def.Subcommands) == 0 {
-		if def.Handler == nil {
-			return registeredCommand{}, fmt.Errorf("%w: command %q needs a handler", ErrInvalidCommand, def.Name)
-		}
-		return compiled, nil
-	}
-
-	if def.Handler != nil || len(def.Parameters) > 0 {
-		return registeredCommand{}, fmt.Errorf("%w: command %q cannot combine subcommands with a handler or parameters", ErrInvalidCommand, def.Name)
-	}
-
-	handlers := make(map[string]command.Handler, len(def.Subcommands))
-
-	for _, sub := range def.Subcommands {
-		if _, exists := handlers[sub.Name]; exists {
-			return registeredCommand{}, fmt.Errorf("%w: duplicate subcommand %q in %q", ErrInvalidCommand, sub.Name, def.Name)
-		}
-
-		child, err := compileCommand(sub)
-		if err != nil {
-			return registeredCommand{}, fmt.Errorf("command %q: %w", def.Name, err)
-		}
-
-		optionType := discordgo.ApplicationCommandOptionSubCommand
-		if len(sub.Subcommands) > 0 {
-			optionType = discordgo.ApplicationCommandOptionSubCommandGroup
-		}
-
-		handlers[sub.Name] = child.handler
-		compiled.definition.Options = append(compiled.definition.Options, &command.Parameter{
-			Type:        optionType,
-			Name:        sub.Name,
-			Description: sub.Description,
-			Options:     child.definition.Options,
-		})
-	}
-
-	compiled.handler = func(ctx context.Context, interaction command.Interaction) (command.Response, error) {
-		if len(interaction.Options) != 1 || interaction.Options[0] == nil {
-			return command.Response{}, fmt.Errorf("%w: expected one subcommand", ErrInvalidCommand)
-		}
-
-		sub := interaction.Options[0]
-		handle, exists := handlers[sub.Name]
-
-		if !exists {
-			return command.Response{}, fmt.Errorf("%w: unknown subcommand %q", ErrInvalidCommand, sub.Name)
-		}
-
-		interaction.Options = sub.Options
-
-		return handle(ctx, interaction)
-	}
-
-	return compiled, nil
+	return b.sess.InteractionRespond(interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Flags: flags},
+	}, discordgo.WithContext(ctx))
 }

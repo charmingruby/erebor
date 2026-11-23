@@ -9,7 +9,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/charmingruby/erebor/discord/mention"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
 
@@ -26,47 +25,43 @@ var (
 	ErrSendReply = errors.New("send Discord bot reply")
 )
 
-type config struct {
-	ErrorMessage   string
-	CommandGuildID string
-	HTTPTimeout    time.Duration
-	HandlerTimeout time.Duration
-	ReplyTimeout   time.Duration
-}
-
-// Bot handles slash commands and optional guild mentions. Construct it with NewBot.
-// Configure it before listening, and call Listen only once per bot.
-// Configuration and registration are not safe for concurrent use.
+// Bot handles slash commands and optional guild mentions. Construct it with New
+// and call Listen once. Configuration is fixed at construction.
 type Bot struct {
-	sess           *discordgo.Session
-	mentionHandler mention.Handler
-	commands       map[string]registeredCommand
-	config         config
+	sess     *discordgo.Session
+	commands map[string]registeredCommand
+	config   config
 }
 
-// NewBot creates a bot without opening a connection. Token is the raw bot token.
-// Mentions are disabled unless WithMentionReplyHandler is supplied.
-// Register commands before calling Listen.
-func NewBot(token string, opts ...BotOption) (*Bot, error) {
-	b := &Bot{
-		config: config{
-			HTTPTimeout:    15 * time.Second,
-			HandlerTimeout: 3 * time.Minute,
-			ReplyTimeout:   time.Minute,
-		},
-		commands: make(map[string]registeredCommand),
+// New creates a bot without connecting. Token is the raw bot token.
+// Supply commands with WithCommands and/or mentions with WithMentionHandler.
+// Options are applied in order and validated once, before creating the session.
+func New(token string, options ...Option) (*Bot, error) {
+	cfg := config{
+		httpTimeout:    15 * time.Second,
+		handlerTimeout: 3 * time.Minute,
+		replyTimeout:   time.Minute,
 	}
-
-	for _, opt := range opts {
-		opt(b)
+	for _, option := range options {
+		option(&cfg)
 	}
-
-	if token == "" ||
-		b.config.HTTPTimeout <= 0 ||
-		b.config.HandlerTimeout <= 0 ||
-		b.config.ReplyTimeout <= 0 {
+	if token == "" || cfg.httpTimeout <= 0 || cfg.handlerTimeout <= 0 || cfg.replyTimeout <= 0 {
 		return nil, ErrInvalidConfig
 	}
+	if cfg.mentionHandler == nil && len(cfg.commands) == 0 {
+		return nil, fmt.Errorf("%w: provide commands or a mention handler", ErrInvalidConfig)
+	}
+
+	b := &Bot{
+		config:   cfg,
+		commands: make(map[string]registeredCommand),
+	}
+	for _, definition := range cfg.commands {
+		if err := b.registerCommand(definition); err != nil {
+			return nil, err
+		}
+	}
+	b.config.commands = nil
 
 	sess, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -74,11 +69,11 @@ func NewBot(token string, opts ...BotOption) (*Bot, error) {
 	}
 
 	sess.Identify.Intents = 0
-	if b.mentionHandler != nil {
+	if b.config.mentionHandler != nil {
 		sess.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
 	}
 
-	sess.Client.Timeout = b.config.HTTPTimeout
+	sess.Client.Timeout = b.config.httpTimeout
 
 	b.sess = sess
 
@@ -98,15 +93,10 @@ func (b *Bot) botID() string {
 
 // Listen connects and registers commands, then handles interactions and mentions
 // until ctx is canceled. It cancels active handlers and waits for them to finish.
-// Normal cancellation returns nil. Call Listen only once per bot, after all
-// configuration and command registration are complete.
+// Normal cancellation returns nil. Call Listen only once per bot.
 func (b *Bot) Listen(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-
-	if b.mentionHandler == nil && len(b.commands) == 0 {
-		return ErrInvalidConfig
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -135,7 +125,7 @@ func (b *Bot) Listen(ctx context.Context) error {
 
 	var removers []func()
 
-	if b.mentionHandler != nil {
+	if b.config.mentionHandler != nil {
 		removers = append(removers, b.sess.AddHandler(func(_ *discordgo.Session, event *discordgo.MessageCreate) {
 			runTrackedHandler(func() {
 				b.handleMentionOrReply(ctx, event)

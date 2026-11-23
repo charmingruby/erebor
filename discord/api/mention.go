@@ -1,13 +1,13 @@
-package mention
+package api
 
 import "context"
 
-// Handler processes a mention or reply. Empty output sends no message.
+// MentionHandler processes a mention or reply. Empty output sends no message.
 // It may run concurrently and must honor context cancellation.
-type Handler func(context.Context, Message) (string, error)
+type MentionHandler func(context.Context, Mention) (string, error)
 
-// Message contains the application-facing data of a mention or reply.
-type Message struct {
+// Mention contains the application-facing data of a mention or reply.
+type Mention struct {
 	ID        string
 	ChannelID string
 	GuildID   string

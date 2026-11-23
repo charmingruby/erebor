@@ -8,7 +8,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/charmingruby/erebor/discord/mention"
+	"github.com/charmingruby/erebor/discord/api"
 	"github.com/charmingruby/erebor/o11y/logging"
 )
 
@@ -23,20 +23,10 @@ func (b *Bot) handleMentionOrReply(ctx context.Context, event *discordgo.Message
 	log = log.With("message_id", message.ID)
 	ctx = logging.WithLogger(ctx, log)
 
-	handlerCtx, cancel := context.WithTimeout(ctx, b.config.HandlerTimeout)
-	defer cancel()
-
-	stopTyping := b.startTyping(handlerCtx, message.ChannelID)
-	defer stopTyping()
-
-	answer, err := b.mentionHandler(handlerCtx, message)
-
-	cancel()
-	stopTyping()
-
+	answer, err := b.executeMention(ctx, message)
 	if err != nil {
 		log.ErrorContext(ctx, "handle Discord mention or reply", "error", err)
-		answer = b.config.ErrorMessage
+		answer = b.config.errorMessage
 	}
 
 	if ctx.Err() != nil || answer == "" {
@@ -50,9 +40,17 @@ func (b *Bot) handleMentionOrReply(ctx context.Context, event *discordgo.Message
 	}
 }
 
-func parseMentionOrReply(m *discordgo.Message, botID string) (mention.Message, bool) {
+func (b *Bot) executeMention(ctx context.Context, message api.Mention) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, b.config.handlerTimeout)
+	defer cancel()
+	stopTyping := b.startTyping(ctx, message.ChannelID)
+	defer stopTyping()
+	return b.config.mentionHandler(ctx, message)
+}
+
+func parseMentionOrReply(m *discordgo.Message, botID string) (api.Mention, bool) {
 	if m.Author.Bot || m.GuildID == "" {
-		return mention.Message{}, false
+		return api.Mention{}, false
 	}
 
 	mentioned := slices.ContainsFunc(m.Mentions, func(user *discordgo.User) bool {
@@ -64,13 +62,13 @@ func parseMentionOrReply(m *discordgo.Message, botID string) (mention.Message, b
 		m.ReferencedMessage.Author.ID == botID
 
 	if !mentioned && !replied {
-		return mention.Message{}, false
+		return api.Mention{}, false
 	}
 
 	content := strings.ReplaceAll(m.Content, "<@"+botID+">", "")
 	content = strings.ReplaceAll(content, "<@!"+botID+">", "")
 
-	message := mention.Message{
+	message := api.Mention{
 		ID:        m.ID,
 		ChannelID: m.ChannelID,
 		GuildID:   m.GuildID,
